@@ -15,7 +15,6 @@ const transferFile = new TransferFile()
 const inbox = transferFile.getInbox()
 let binImageWidget = null;
 
-// This will hold the data so the page access via swipe can access it
 let secondaryPageData = '[]';
 
 Page(
@@ -26,8 +25,6 @@ Page(
 
         if (!stats) {
           console.log(`[STAGE 5 ERROR] File does not exist.`);
-
-          // Debug code to list files on the device for troubleshooting
           try {
             const files = readdirSync({ path: 'download' });
             console.log(`Found ${files.length} files inside the 'download' folder:`);
@@ -35,7 +32,6 @@ Page(
           } catch (scanErr) {
             console.log(`X-Ray failed: ${scanErr.message}`);
           }
-
           return false;
         }
 
@@ -51,7 +47,6 @@ Page(
 
         const view = new Uint8Array(buf);
 
-        // Detect that the file is actually a PNG (look for the standard PNG header bytes)
         if (view[0] === 137 && view[1] === 80 && view[2] === 78 && view[3] === 71) {
           console.log(`[STAGE 5 ERROR] FATAL: This is a raw PNG file! Phone failed to convert.`);
           return false;
@@ -64,39 +59,29 @@ Page(
       }
     },
 
-    onInit() {
-      // Grab the global app instance
+    onInit(param) {
       const app = getApp();
-
-      // Default to the local parameter (in case of a warm boot)
       let launchParam = param;
 
-      // Check if app.js caught an alarm parameter during a Cold Boot
       if (app._options.globalData && app._options.globalData.alarmParam) {
         launchParam = app._options.globalData.alarmParam;
-
-        // Clear it out so it doesn't vibrate again if you navigate away and come back
         app._options.globalData.alarmParam = null;
       }
 
-      // Trigger the haptics
       if (launchParam === 'trigger=alarm') {
         const vibrator = new Vibrator()
         vibrator.start({ scene: VIBRATOR_SCENE_LONG })
       }
+      
       inbox.on('NEWFILE', () => {
         const fileObject = inbox.getNextFile();
-
         fileObject.on('change', (event) => {
           if (event.data.readyState === 'transferred') {
-
-            // Strip out any weird paths and forcefully point to the download folder
             const baseName = fileObject.fileName.replace('data://', '').replace('download/', '');
             const safeWatchPath = `download/${baseName}`;
 
             if (this.validateFile(safeWatchPath)) {
               if (binImageWidget) {
-                // UI paths require the data:// prefix in front of the folder!
                 binImageWidget.setProperty(prop.SRC, `data://${safeWatchPath}`);
               }
             }
@@ -106,41 +91,66 @@ Page(
     },
 
     build() {
-      const { width } = getDeviceInfo()
+      // --- RESPONSIVE MATHS ENGINE ---
+      const { width, height, screenShape } = getDeviceInfo()
+      const isRound = screenShape === 1
+      
+      const primaryTextSize = Math.floor(width * 0.065) 
+      const secondaryTextSize = Math.floor(width * 0.055) 
+
+      // 1. Title Area
+      const titleY = isRound ? height * 0.07 : height * 0.02
+      const titleH = height * 0.15
+
+      // 2. Colored Bins Area
+      const colorsY = titleY + titleH + 8 
+      const colorsH = height * 0.08
+      const colorsWordWidth = width * 0.25 
+
+      // 3. Image Area
+      // Set the width to the exact pixel width of the current screen
+      const imageWidth = width; 
+      // Calculate the perfect 195/450 ratio based on that screen width
+      const imageH = Math.floor(width * (195 / 450)); 
+      
+      const imageY = colorsY + colorsH + (height * 0.01) + 6;
+
+      // 4. Button Area
+      const buttonH = height * 0.18 
+      const buttonY = height - buttonH 
+      const buttonW = width * 0.65 
+      // ------------------------------
+
       let areaId = "0"
       setPageBrightTime({ brightTime: 30000 })
 
+      // Move to another page on left swipe if there are bins not listed on this page
       onGesture({
         callback: (event) => {
-          // If the user swipes left, and we have future bin data calculated
           if (event === GESTURE_LEFT && secondaryPageData !== '[]') {
             push({ url: 'page/other', params: secondaryPageData })
-            return true // Tell the OS we successfully handled this swipe
+            return true 
           }
-          return false // Let the OS handle any other swipes normally
+          return false 
         }
       })
 
       const dateTextWidget = createWidget(widget.TEXT, {
-        x: 20, y: 35, w: width - 40, h: 100,
-        color: 0xffffff, text_size: 32, align_h: align.CENTER_H, align_v: align.CENTER_V,
+        x: 0, y: titleY, w: width, h: titleH,
+        color: 0xffffff, text_size: primaryTextSize, align_h: align.CENTER_H, align_v: align.CENTER_V,
         text_style: text_style.WRAP, text: 'Checking bins...'
       })
 
-      const imageWidth = 450;
-
       binImageWidget = createWidget(widget.IMG, {
-        // Centering math: (Screen Width - Image Width) divided by 2
-        x: (width - imageWidth) / 2,
-        y: 190,
+        x: 0, 
+        y: imageY,
         w: imageWidth,
-        h: 200,
+        h: imageH,
         src: ''
       })
 
       this.request({ method: 'GET_AREA_ID' })
         .then((settingsResponse) => {
-          // If the setting is empty, tell the user to open their phone
           if (!settingsResponse || !settingsResponse.areaId) {
             dateTextWidget.setProperty(prop.TEXT, 'Please set Area ID\nin Zepp App')
             return
@@ -167,36 +177,27 @@ Page(
 
               dateTextWidget.setProperty(prop.TEXT, `Next bin collection\n${formatBinDate(nextDate)}`);
 
-              // Give each word a fixed width box to sit in
-              const wordWidth = 110;
-
-              // Calculate the starting X coordinate so the whole group sits dead centre
-              const totalGroupWidth = colours.length * wordWidth;
+              const totalGroupWidth = colours.length * colorsWordWidth;
               const startX = (width - totalGroupWidth) / 2;
 
-              // Loop through the bins and spawn a widget for each one (assumption is that there won't be loads of them)
               colours.forEach((binName, index) => {
                 const lowerName = binName.toLowerCase();
 
                 createWidget(widget.TEXT, {
-                  x: startX + (index * wordWidth),
-                  y: 135,
-                  w: wordWidth,
-                  h: 45,
-                  // Look up the color, default to grey if not found
+                  x: startX + (index * colorsWordWidth),
+                  y: colorsY,
+                  w: colorsWordWidth,
+                  h: colorsH,
                   color: binColorMap[lowerName] || 0xaaaaaa,
-                  text_size: 32,
+                  text_size: primaryTextSize,
                   align_h: align.CENTER_H,
                   text: binName
                 })
               })
 
               const urlColours = colours.map(c => c.toLowerCase()).join(',');
-
-              // Get all bins that are NOT happening on the next immediate date
               const remainingBins = futureBins.filter(b => b.date !== nextDate)
 
-              // Group the first occurrence of each remaining color by date
               const seenColours = new Set()
               const groupedOtherBins = {}
 
@@ -208,7 +209,6 @@ Page(
                 }
               }
 
-              // Format into a clean array and serialize it for the swipe router
               const futureDisplayList = Object.keys(groupedOtherBins).map(date => ({
                 date: date,
                 colours: groupedOtherBins[date].join(', ')
@@ -216,17 +216,18 @@ Page(
 
               secondaryPageData = JSON.stringify(futureDisplayList)
 
-              // Remind me button - for 18:30 the day before the next collection
               createWidget(widget.BUTTON, {
-                x: 20, y: 390, w: width - 40, h: 70,
+                x: (width - buttonW) / 2, 
+                y: buttonY, 
+                w: buttonW, 
+                h: buttonH,
                 text: 'Remind me',
-                text_size: 32,
+                text_size: primaryTextSize,
                 color: 0xffffff,
                 normal_color: 0x333333,
                 press_color: 0x555555,
                 radius: 12,
                 click_func: () => {
-                  // Give immediate tactile feedback that the button was pressed
                   const vibrator = new Vibrator()
                   vibrator.start({ scene: VIBRATOR_SCENE_SHORT_LIGHT })
 
@@ -234,7 +235,6 @@ Page(
                   alarmDate.setDate(alarmDate.getDate() - 1)
                   alarmDate.setHours(18, 30, 0, 0)
 
-                  //const alarmTimeSeconds = Math.floor(Date.now() / 1000) + 15 // to test
                   const alarmTimeSeconds = Math.floor(alarmDate.getTime() / 1000)
                   const nowSeconds = Math.floor(Date.now() / 1000)
 
@@ -248,24 +248,23 @@ Page(
 
                   set({
                     url: 'page/index',
-                    // Pass a trigger string to the app when it wakes up
                     param: 'trigger=alarm',
                     time: alarmTimeSeconds,
                     repeat_type: REPEAT_ONCE
                   })
 
-                  showToast({ content: 'Reminder set for 18:30' })
+                  showToast({ content: 'Reminder set for 18:30' }) 
                 }
               })
 
               this.request({
                 method: 'DOWNLOAD_IMAGE',
-                bins: urlColours
+                bins: urlColours,
+                imgWidth: imageWidth
               }, { timeout: 60000 })
                 .then((response) => {
                   if (response && response.success) {
                     setTimeout(() => {
-                      // If the new file is not detected, fall back to this
                       const baseName = response.fileName.replace('data://', '').replace('download/', '');
                       const safeWatchPath = `download/${baseName}`;
 
@@ -273,7 +272,6 @@ Page(
                         binImageWidget.setProperty(prop.SRC, `data://${safeWatchPath}`);
                       }
                     }, 3000);
-
                   } else {
                     console.log("Phone script failed early.");
                   }

@@ -11,9 +11,9 @@ AppSideService(BaseSideService({
     }
 
     if (req.method === 'DOWNLOAD_IMAGE') {
-      const { bins } = req
+      const { bins, imgWidth } = req
       
-      const imgProxyUrl = `https://www.sk7software.co.uk/bins/makeImage.php?bins=${bins}`
+      const imgProxyUrl = `https://www.sk7software.co.uk/bins/makeImage.php?bins=${bins}&width=${imgWidth}`
       
       const rawName = 'raw_image.png'
       const convertedName = 'converted_image.png'

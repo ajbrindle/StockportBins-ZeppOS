@@ -11,65 +11,97 @@ Page(
     },
 
     build() {
-      const { width } = getDeviceInfo()
+      // --- RESPONSIVE MATH ENGINE ---
+      const { width, height, screenShape } = getDeviceInfo()
+      const isRound = screenShape === 1
+      
+      // 1. Text Sizing 
+      const titleTextSize = Math.floor(width * 0.070) // ~33px on Balance
+      const primaryTextSize = Math.floor(width * 0.065) // ~31px on Balance
+      
+      // 2. Title Area
+      // Push down if the screen is round so the curve doesn't clip the title
+      const titleY = isRound ? height * 0.12 : height * 0.05
+      const titleH = height * 0.12
+      
+      // 3. Separator Line
+      const lineY = titleY + titleH
+      const lineW = width * 0.75 // 75% of screen width
+      const lineX = (width - lineW) / 2
+      
+      // 4. List Row Metrics
+      const listStartY = lineY + (height * 0.04) // Small gap below the line
+      const dateH = height * 0.10
+      const binH = height * 0.08
+      const rowGap = height * 0.05 // Spacing between different weeks
+      const colorsWordWidth = width * 0.28 // 28% of screen width per color
+      // ------------------------------
       
       // Page Title
       createWidget(widget.TEXT, {
-        x: 0, y: 40, w: width, h: 60,
-        color: 0xffffff, text_size: 32, 
-        align_h: align.CENTER_H, 
+        x: 0, y: titleY, w: width, h: titleH,
+        color: 0xffffff, text_size: titleTextSize, 
+        align_h: align.CENTER_H, align_v: align.CENTER_V,
         text: 'Other Dates'
       })
 
       // Draw a line under the title
       createWidget(widget.FILL_RECT, {
-        x: 40, y: 100, w: width - 80, h: 5, color: 0x333333
+        x: lineX, y: lineY, w: lineW, h: Math.max(2, Math.floor(height * 0.005)), color: 0x333333
       })
 
       if (this.futureBinsList.length === 0) {
         createWidget(widget.TEXT, {
-          x: 20, y: 180, w: width - 40, h: 80,
-          color: 0xaaaaaa, text_size: 32, align_h: align.CENTER_H, 
+          x: 0, y: listStartY + (height * 0.05), w: width, h: height * 0.20,
+          color: 0xaaaaaa, text_size: primaryTextSize, align_h: align.CENTER_H, align_v: align.CENTER_V,
           text: 'No other bins found.'
         })
         return
       }
 
       // Loop through the data and draw a row for each date
-      let currentY = 110
+      let currentY = listStartY
 
       this.futureBinsList.forEach((item) => {
         // Draw the Date
         createWidget(widget.TEXT, {
-          x: 20, y: currentY, w: width - 40, h: 50,
-          color: 0xaaaaaa, text_size: 32, align_h: align.CENTER_H, 
+          x: 0, y: currentY, w: width, h: dateH,
+          color: 0xaaaaaa, text_size: primaryTextSize, align_h: align.CENTER_H, align_v: align.CENTER_V,
           text: formatBinDate(item.date, true)
         })
         
-        // The main page passed the colors as a string ("Blue, Brown"). 
-        // We split it back into an array here so we can loop over it.
         const binArray = item.colours.split(', ')
-        const wordWidth = 110;
-        const totalGroupWidth = binArray.length * wordWidth;
+        const totalGroupWidth = binArray.length * colorsWordWidth;
         const startX = (width - totalGroupWidth) / 2;
 
         binArray.forEach((binName, index) => {
           const lowerName = binName.toLowerCase();
           
           createWidget(widget.TEXT, {
-            x: startX + (index * wordWidth), 
-            y: currentY + 50, // Drop down slightly below the date
-            w: wordWidth, 
-            h: 50,
+            x: startX + (index * colorsWordWidth), 
+            y: currentY + dateH, 
+            w: colorsWordWidth, 
+            h: binH,
             color: binColorMap[lowerName] || 0xaaaaaa, 
-            text_size: 32, 
-            align_h: align.CENTER_H, 
+            text_size: primaryTextSize, 
+            align_h: align.CENTER_H, align_v: align.CENTER_V, 
             text: binName
           })
         })
         
-        currentY += 100 
+        // Push the Y coordinate down for the next loop iteration
+        currentY += (dateH + binH + rowGap) 
       })
+
+      // --- CRITICAL BEZEL FIX ---
+      // We draw an invisible black box at the very end of the list. 
+      // This forces the OS scroll engine to let the user scroll the last text item 
+      // up into the flat middle of the screen, instead of leaving it trapped in the curved bottom!
+      if (isRound) {
+        createWidget(widget.FILL_RECT, {
+          x: 0, y: currentY, w: width, h: height * 0.15, color: 0x000000 
+        })
+      }
     }
   })
 )
